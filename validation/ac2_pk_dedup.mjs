@@ -33,11 +33,11 @@ async function main() {
   // First check: do the 15 cleanse scripts exist?
   const scriptDir = '/workspace/project/bigquery';
   const cleanseScripts = [
-    '09-cleanse-agent.sql', '10-cleanse-contract.sql', '11-cleanse-client.sql',
-    '12-cleanse-program.sql', '13-cleanse-queue.sql', '14-cleanse-call.sql',
-    '15-cleanse-interaction.sql', '16-cleanse-survey.sql', '17-cleanse-ivr-session.sql',
-    '18-cleanse-chat-session.sql', '19-cleanse-ticket.sql', '20-cleanse-invoice.sql',
-    '21-cleanse-qa-evaluation.sql', '22-cleanse-rate-card.sql', '23-cleanse-schedule.sql'
+    '09-cleanse-program.sql', '10-cleanse-contract.sql', '11-cleanse-contract-line.sql',
+    '12-cleanse-org-unit.sql', '13-cleanse-queue.sql', '14-cleanse-schedule.sql',
+    '15-cleanse-adherence-event.sql', '16-cleanse-call.sql', '17-cleanse-ivr-session.sql',
+    '18-cleanse-chat-session.sql', '19-cleanse-email-interaction.sql', '20-cleanse-survey-response.sql',
+    '21-cleanse-qa-evaluation.sql', '22-cleanse-interaction.sql', '23-cleanse-dialer-attempt.sql'
   ];
 
   let found = 0;
@@ -67,10 +67,11 @@ async function main() {
 
   // Check: do ODS target tables exist and have data?
   const odsTargets = [
-    'ods_agent', 'ods_contract', 'ods_client', 'ods_program', 'ods_queue',
-    'ods_call', 'ods_interaction', 'ods_survey', 'ods_ivr_session',
-    'ods_chat_session', 'ods_ticket', 'ods_invoice', 'ods_qa_evaluation',
-    'ods_rate_card', 'ods_schedule'
+    'ods_program', 'ods_contract', 'ods_contract_line',
+    'ods_org_unit', 'ods_queue', 'ods_schedule',
+    'ods_adherence_event', 'ods_call', 'ods_ivr_session',
+    'ods_chat_session', 'ods_email_interaction', 'ods_survey_response',
+    'ods_qa_evaluation', 'ods_interaction', 'ods_dialer_attempt'
   ];
 
   const [tables] = await bq.dataset('test').getTables();

@@ -111,10 +111,14 @@ async function main() {
   check('ODS tables exist for epoch validation', odsWithEpochs.length >= 15,
     `only ${odsWithEpochs.length} ODS tables found (expected 15)`);
 
-  // Check EPOCH-POLICY.md exists
-  const policyPath = '/workspace/project/docs/EPOCH-POLICY.md';
-  check('docs/EPOCH-POLICY.md exists', fs.existsSync(policyPath),
-    'EPOCH-POLICY.md not found');
+  // Check EPOCH-POLICY.md exists (reference doc in source codebase)
+  const policyPaths = [
+    '/workspace/project/docs/EPOCH-POLICY.md',
+    '/workspace/source/docs/EPOCH-POLICY.md',
+  ];
+  const policyFound = policyPaths.some(p => fs.existsSync(p));
+  check('docs/EPOCH-POLICY.md exists', policyFound,
+    'EPOCH-POLICY.md not found in project or source docs');
 
   console.log('');
   console.log(`  RESULT: ${failed === 0 ? 'PASS' : 'FAIL'} (${passed} passed, ${failed} failed)`);

@@ -37,17 +37,17 @@ async function main() {
 
   // Cleanse scripts 09-23
   const expectedCleanse = [
-    '09-cleanse-agent.sql', '10-cleanse-contract.sql', '11-cleanse-client.sql',
-    '12-cleanse-program.sql', '13-cleanse-queue.sql', '14-cleanse-call.sql',
-    '15-cleanse-interaction.sql', '16-cleanse-survey.sql', '17-cleanse-ivr-session.sql',
-    '18-cleanse-chat-session.sql', '19-cleanse-ticket.sql', '20-cleanse-invoice.sql',
-    '21-cleanse-qa-evaluation.sql', '22-cleanse-rate-card.sql', '23-cleanse-schedule.sql'
+    '09-cleanse-program.sql', '10-cleanse-contract.sql', '11-cleanse-contract-line.sql',
+    '12-cleanse-org-unit.sql', '13-cleanse-queue.sql', '14-cleanse-schedule.sql',
+    '15-cleanse-adherence-event.sql', '16-cleanse-call.sql', '17-cleanse-ivr-session.sql',
+    '18-cleanse-chat-session.sql', '19-cleanse-email-interaction.sql', '20-cleanse-survey-response.sql',
+    '21-cleanse-qa-evaluation.sql', '22-cleanse-interaction.sql', '23-cleanse-dialer-attempt.sql'
   ];
 
   const expectedDim = [
     '41-load-dim-date.sql', '42-load-dim-agent.sql', '43-load-dim-client.sql',
-    '44-load-dim-program.sql', '45-load-dim-queue.sql', '46-load-dim-contract.sql',
-    '47-load-dim-rate-card.sql', '48-load-dim-invoice.sql', '49-load-dim-schedule.sql'
+    '44-load-dim-program.sql', '45-load-dim-queue.sql', '46-load-dim-site.sql',
+    '47-load-dim-shift.sql', '48-load-dim-org.sql', '49-load-dim-disposition.sql'
   ];
 
   const expectedFact = [
@@ -109,14 +109,15 @@ async function main() {
 
   // Expected ODS tables (cleanse targets)
   const expectedOds = [
-    'ods_agent', 'ods_contract', 'ods_client', 'ods_program', 'ods_queue',
-    'ods_call', 'ods_interaction', 'ods_survey', 'ods_ivr_session',
-    'ods_chat_session', 'ods_ticket', 'ods_invoice', 'ods_qa_evaluation',
-    'ods_rate_card', 'ods_schedule'
+    'ods_program', 'ods_contract', 'ods_contract_line',
+    'ods_org_unit', 'ods_queue', 'ods_schedule',
+    'ods_adherence_event', 'ods_call', 'ods_ivr_session',
+    'ods_chat_session', 'ods_email_interaction', 'ods_survey_response',
+    'ods_qa_evaluation', 'ods_interaction', 'ods_dialer_attempt'
   ];
   const expectedDimTables = [
     'dim_date', 'dim_agent', 'dim_client', 'dim_program', 'dim_queue',
-    'dim_contract', 'dim_rate_card', 'dim_invoice', 'dim_schedule'
+    'dim_site', 'dim_shift', 'dim_org', 'dim_disposition'
   ];
   const expectedFactTables = [
     'fact_interaction', 'fact_agent_activity', 'fact_queue_interval',
