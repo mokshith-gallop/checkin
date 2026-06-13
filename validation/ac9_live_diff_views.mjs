@@ -132,14 +132,23 @@ async function impQ(sess, sql) {
   console.log('║  AC #9 — Live-diff: BigQuery View Creation + Columns       ║');
   console.log('╚══════════════════════════════════════════════════════════════╝\n');
 
-  // ── Connect BigQuery ──────────────────────────────────────────────
-  const oac = new OAuth2Client();
-  oac.setCredentials({ access_token: process.env.BIGQUERY_TEST_BQ_TOKEN });
-  const bq = new BigQuery({
-    projectId: process.env.BIGQUERY_TEST_BQ_PROJECT,
-    authClient: oac,
-    location: process.env.BIGQUERY_TEST_BQ_LOCATION || 'EU',
-  });
+  // ── Connect BigQuery (with token refresh helper) ───────────────────
+  function makeBq() {
+    // Re-read token from env file in case it rotated during long run
+    try {
+      const envTxt = fs.readFileSync('/workspace/.gallop/db.env', 'utf8');
+      const m = envTxt.match(/BIGQUERY_TEST_BQ_TOKEN='([^']+)'/);
+      if (m) process.env.BIGQUERY_TEST_BQ_TOKEN = m[1];
+    } catch(_) {}
+    const oa = new OAuth2Client();
+    oa.setCredentials({ access_token: process.env.BIGQUERY_TEST_BQ_TOKEN });
+    return new BigQuery({
+      projectId: process.env.BIGQUERY_TEST_BQ_PROJECT,
+      authClient: oa,
+      location: process.env.BIGQUERY_TEST_BQ_LOCATION || 'EU',
+    });
+  }
+  let bq = makeBq();
   console.log(`  ✓ BigQuery connected (dataset: ${BQ_DS})\n`);
 
   // ── Connect Impala (for source-view column resolution) ────────────

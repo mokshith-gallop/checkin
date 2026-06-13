@@ -185,7 +185,11 @@ function extractBqDescs(meta) {
   // ── Connect BigQuery ──────────────────────────────────────────────
   const oac = new OAuth2Client();
   oac.setCredentials({ access_token: process.env.BIGQUERY_TEST_BQ_TOKEN });
-  const bq = new BigQuery({ projectId: process.env.BIGQUERY_TEST_BQ_PROJECT, authClient: oac });
+  const bq = new BigQuery({
+    projectId: process.env.BIGQUERY_TEST_BQ_PROJECT,
+    authClient: oac,
+    location: process.env.BIGQUERY_TEST_BQ_LOCATION || 'EU',
+  });
   console.log(`  ✓ BigQuery connected (dataset: ${BQ_DS})\n`);
 
   // ── Create scratch Impala databases ───────────────────────────────
