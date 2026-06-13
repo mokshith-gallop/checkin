@@ -36,13 +36,21 @@ WITH stg_epoch_cols AS (
   )
 ),
 
--- Check 2: ODS/DM timestamp columns must be TIMESTAMP (not INT64)
+-- Check 2: ODS timestamp columns ending in _ts must be TIMESTAMP
+-- (operator precedence: parentheses around the OR)
 ods_ts_cols AS (
   SELECT table_name, column_name, data_type,
          CASE WHEN data_type = 'TIMESTAMP' THEN 'PASS' ELSE 'FAIL' END AS status
   FROM   ods.INFORMATION_SCHEMA.COLUMNS
-  WHERE  (column_name LIKE '%_ts' OR column_name LIKE '%_ts_%')
-    AND  data_type IN ('TIMESTAMP', 'INT64', 'STRING')
+  WHERE  (column_name LIKE '%\_ts' ESCAPE '\\' OR column_name LIKE '%\_ts\_%' ESCAPE '\\')
+),
+
+-- Check 2b: DM timestamp columns ending in _ts must be TIMESTAMP
+dm_ts_cols AS (
+  SELECT table_name, column_name, data_type,
+         CASE WHEN data_type = 'TIMESTAMP' THEN 'PASS' ELSE 'FAIL' END AS status
+  FROM   dm.INFORMATION_SCHEMA.COLUMNS
+  WHERE  (column_name LIKE '%\_ts' ESCAPE '\\' OR column_name LIKE '%\_ts\_%' ESCAPE '\\')
 ),
 
 -- Check 3: Lie columns must have MILLISECONDS in description
@@ -77,6 +85,10 @@ SELECT 'ods_epoch_timestamp', table_name, column_name, data_type, status
 FROM   ods_ts_cols
 WHERE  status = 'FAIL'
 UNION ALL
+SELECT 'dm_epoch_timestamp', table_name, column_name, data_type, status
+FROM   dm_ts_cols
+WHERE  status = 'FAIL'
+UNION ALL
 SELECT 'lie_ms_description', table_name, column_name, data_type, status
 FROM   lie_cols
 WHERE  status = 'FAIL'
@@ -96,6 +108,7 @@ SELECT 'OVERALL',
 FROM (
   SELECT status FROM stg_epoch_cols
   UNION ALL SELECT status FROM ods_ts_cols
+  UNION ALL SELECT status FROM dm_ts_cols
   UNION ALL SELECT status FROM lie_cols
   UNION ALL SELECT status FROM ora_str_cols
 );

@@ -41,19 +41,12 @@ nullable_check AS (
     AND  c.is_nullable <> 'YES'
 ),
 
--- Check 3: No description references ORC or transactional
+-- Check 3: No column description references ORC or transactional
 desc_check AS (
   SELECT c.table_name AS tbl,
          c.column_name,
-         c.description AS col_description,
+         COALESCE(c.description, '') AS col_description,
          'FAIL' AS status
-  FROM   staging.INFORMATION_SCHEMA.COLUMN_FIELD_PATHS c
-  WHERE  FALSE  -- placeholder: actual check below uses ODS
-  UNION ALL
-  SELECT c.table_name,
-         c.column_name,
-         COALESCE(c.description, ''),
-         'FAIL'
   FROM   ods.INFORMATION_SCHEMA.COLUMN_FIELD_PATHS c
   WHERE  c.table_name IN ('ods_client_acid', 'ods_agent_acid',
                            'ods_ticket_acid', 'ods_invoice_acid')
