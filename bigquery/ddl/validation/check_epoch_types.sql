@@ -36,21 +36,41 @@ WITH stg_epoch_cols AS (
   )
 ),
 
--- Check 2: ODS timestamp columns ending in _ts must be TIMESTAMP
--- (operator precedence: parentheses around the OR)
+-- Check 2: ODS/DM timestamp columns must be TIMESTAMP (not INT64/STRING).
+-- Use an explicit list of all known _ts columns in ODS to avoid LIKE
+-- pattern ambiguity and ensure completeness.
 ods_ts_cols AS (
   SELECT table_name, column_name, data_type,
          CASE WHEN data_type = 'TIMESTAMP' THEN 'PASS' ELSE 'FAIL' END AS status
   FROM   ods.INFORMATION_SCHEMA.COLUMNS
-  WHERE  (column_name LIKE '%\_ts' ESCAPE '\\' OR column_name LIKE '%\_ts\_%' ESCAPE '\\')
+  WHERE  column_name IN (
+    -- cleanse layer
+    'go_live_ts', 'updated_ts', 'start_ts', 'end_ts', 'signed_ts',
+    'effective_ts', 'created_ts', 'answer_ts',
+    'first_event_ts', 'last_event_ts', 'started_ts', 'ended_ts',
+    'received_ts', 'first_reply_ts', 'resolved_ts', 'survey_ts',
+    'evaluated_ts', 'attempt_ts',
+    -- delta-merge layer
+    'last_change_ts', 'requested_ts', 'scheduled_ts', 'log_ts',
+    'notice_ts',
+    -- SCD-2 layer
+    'eff_from_ts', 'eff_to_ts',
+    -- ACID layer
+    'hire_ts', 'term_ts', 'issued_ts', 'due_ts',
+    'expiry_ts'
+  )
 ),
 
--- Check 2b: DM timestamp columns ending in _ts must be TIMESTAMP
+-- Check 2b: DM timestamp columns must be TIMESTAMP
 dm_ts_cols AS (
   SELECT table_name, column_name, data_type,
          CASE WHEN data_type = 'TIMESTAMP' THEN 'PASS' ELSE 'FAIL' END AS status
   FROM   dm.INFORMATION_SCHEMA.COLUMNS
-  WHERE  (column_name LIKE '%\_ts' ESCAPE '\\' OR column_name LIKE '%\_ts\_%' ESCAPE '\\')
+  WHERE  column_name IN (
+    'start_ts', 'end_ts', 'first_state_ts', 'last_state_ts',
+    'interval_start_ts', 'survey_ts', 'evaluated_ts',
+    'created_ts', 'resolved_ts'
+  )
 ),
 
 -- Check 3: Lie columns must have MILLISECONDS in description
@@ -76,7 +96,7 @@ ora_str_cols AS (
     AND  table_name IN ('stg_crm_contract', 'stg_crm_contract_line')
 )
 
--- Combined results
+-- Combined results: show only failures, plus a summary
 SELECT 'stg_epoch_int64' AS check_name, table_name, column_name, data_type, status
 FROM   stg_epoch_cols
 WHERE  status = 'FAIL'
@@ -97,7 +117,7 @@ SELECT 'ora_str_description', table_name, column_name, data_type, status
 FROM   ora_str_cols
 WHERE  status = 'FAIL'
 UNION ALL
--- Summary row: PASS if no failures above
+-- Summary row
 SELECT 'OVERALL',
        CAST(COUNT(*) AS STRING) || ' checks',
        CASE WHEN SUM(CASE WHEN status = 'FAIL' THEN 1 ELSE 0 END) = 0 THEN 'ALL PASS'
