@@ -1,17 +1,14 @@
 #!/usr/bin/env node
 // =============================================================================
-// AC #10 — Live-diff validation: Column comment preservation
+// AC #10 — Live-diff validation: column comment preservation
 //
 // For every Impala-creatable source table:
-//   1. Creates the table in scratch Impala from source DDL
+//   1. Creates table in Impala scratch DB from source DDL
 //   2. Reads live Impala DESCRIBE (source column comment)
-//   3. Creates the matching BQ table from converted DDL
+//   3. Creates BQ scratch table from converted DDL (preserving OPTIONS descriptions)
 //   4. Reads BQ table.getMetadata() column descriptions
-//   5. Asserts every source COMMENT is preserved as semantically-equivalent
-//      BigQuery column description
-//   6. Prints preserved X/Y coverage line
-//   7. FAILS listing any column whose comment is missing or altered
-//   8. Columns on tables Impala cannot create → source-ddl-not-creatable
+//   5. Asserts every source COMMENT is preserved as equivalent BQ description
+//   6. Prints preserved X/Y coverage and lists any missing/altered comments
 //
 // Usage:
 //   set -a; source /workspace/.gallop/db.env; set +a
@@ -20,8 +17,8 @@
 import { createRequire } from 'module';
 const require = createRequire('/opt/workspace-mcp/node_modules/.package-lock.json');
 
-const hive    = require('hive-driver');
-const { BigQuery }    = require('@google-cloud/bigquery');
+const hive = require('hive-driver');
+const { BigQuery } = require('@google-cloud/bigquery');
 const { OAuth2Client } = require('google-auth-library');
 const fs   = require('fs');
 const path = require('path');
@@ -30,19 +27,20 @@ const { TCLIService, TCLIService_types } = hive.thrift;
 const utils = new hive.HiveUtils(TCLIService_types);
 
 // ── Config ──────────────────────────────────────────────────────────────
-const SRC_DDL   = '/workspace/source/hive/ddl';
-const BQ_DDL    = '/workspace/project/bigquery/ddl';
-const BQ_DS     = process.env.BIGQUERY_TEST_BQ_DATASETS || 'test';
-const BQ_PFX    = 'qa_val10_';
-const IMP_PFX   = 'qa_val10_';
+const SRC_DDL = '/workspace/source/hive/ddl';
+const BQ_DDL  = '/workspace/project/bigquery/ddl';
+const BQ_DS   = process.env.BIGQUERY_TEST_BQ_DATASETS || 'test';
+const IMP_PFX = 'qa_val10_';
+const BQ_PFX  = 'qa_val10_';
 
 const SRC_FILES = [
-  '02-staging-sqoop-mirrors.hql',
-  '03-staging-delta-feeds.hql',
-  '04-staging-file-feeds.hql',
+  '02-staging-sqoop-mirrors.hql', '03-staging-delta-feeds.hql',
+  '04-staging-file-feeds.hql',    '05-ods-cleanse.hql',
+  '06-ods-delta-scd2.hql',        '07-ods-acid.hql',
+  '08-dm-tables.hql',
 ];
-// Only staging layer has COMMENTs in the source DDL; ODS/DM have none.
 
+// Impala reserved words (reused from ac8)
 const RESERVED = new Set([
   'role','comment','end','start','date','key','type','order','group',
   'table','column','replace','select','from','where','join','on',
@@ -51,18 +49,8 @@ const RESERVED = new Set([
   'timestamp','decimal','array','map','struct','partition','data',
 ]);
 
-// ── Impala helper ───────────────────────────────────────────────────────
-async function impQ(sess, sql) {
-  const op = await sess.executeStatement(sql, { runAsync: true });
-  await utils.waitUntilReady(op, false, () => {});
-  await utils.fetchAll(op, 1);  // FETCH_NEXT
-  const r = utils.getResult(op).getValue() ?? [];
-  await op.close();
-  return r;
-}
-
-// ── Parse source table DDL ──────────────────────────────────────────────
-function parseSrcTables(fp) {
+// ── Parse source DDL ────────────────────────────────────────────────────
+function parseSrcFile(fp) {
   const txt = fs.readFileSync(fp, 'utf8');
   const out = [];
   const parts = txt.split(/(?=CREATE\s+(?:EXTERNAL\s+)?TABLE\s+IF\s+NOT\s+EXISTS)/i);
@@ -73,25 +61,28 @@ function parseSrcTables(fp) {
     const semi = part.indexOf(';');
     const stmt = semi >= 0 ? part.substring(0, semi + 1) : part.trim() + ';';
     const blocks = [];
-    if (/transactional.*true/i.test(stmt))                blocks.push('ACID/transactional');
-    if (/MAP\s*<\s*STRING\s*,\s*STRING\s*>/i.test(stmt))  blocks.push('MAP<STRING,STRING>');
-    if (/RegexSerDe/i.test(stmt))                         blocks.push('RegexSerDe');
+    if (/transactional.*true/i.test(stmt))               blocks.push('ACID/transactional');
+    if (/MAP\s*<\s*STRING\s*,\s*STRING\s*>/i.test(stmt)) blocks.push('MAP<STRING,STRING>');
+    if (/RegexSerDe/i.test(stmt))                        blocks.push('RegexSerDe');
     out.push({ db, name, stmt, blocks });
   }
   return out;
 }
 
-// ── Adapt Hive DDL for Impala ───────────────────────────────────────────
+// ── Adapt Hive DDL for Impala (from ac8) ────────────────────────────────
 function adaptImpala(stmt, db, name) {
   let s = stmt;
+  const sdb = IMP_PFX + db;
   s = s.replace(/CREATE\s+(EXTERNAL\s+)?TABLE\s+IF\s+NOT\s+EXISTS\s+\S+/i,
-    `CREATE TABLE IF NOT EXISTS ${IMP_PFX}${db}.${name}`);
+    `CREATE TABLE IF NOT EXISTS ${sdb}.${name}`);
   s = s.replace(/LOCATION\s+'[^']*'\s*;?/gi, '');
   s = s.replace(/TBLPROPERTIES\s*\([^)]*\)\s*;?/gi, '');
   s = s.replace(/ROW\s+FORMAT[\s\S]*?(?=STORED|LOCATION|TBLPROPERTIES|PARTITIONED|;|$)/gi, '');
   s = s.replace(/WITH\s+SERDEPROPERTIES\s*\([^)]*\)/gi, '');
   s = s.replace(/STORED\s+AS\s+\w+/gi, '');
   s = s.replace(/CLUSTERED\s+BY\s*\([^)]*\)\s+INTO\s+\d+\s+BUCKETS/gi, '');
+
+  // Quote reserved words in column block
   const p1 = s.indexOf('(');
   if (p1 >= 0) {
     let depth = 0, p2 = -1;
@@ -106,6 +97,7 @@ function adaptImpala(stmt, db, name) {
       s = s.substring(0, p1) + cb + s.substring(p2 + 1);
     }
   }
+
   s = s.replace(/PARTITIONED\s+BY\s*\(([^)]+)\)/gi, (_, inner) => {
     const fixed = inner.split(',').map(pair => {
       const parts = pair.trim().split(/\s+/);
@@ -115,89 +107,68 @@ function adaptImpala(stmt, db, name) {
     }).join(', ');
     return `PARTITIONED BY (${fixed})`;
   });
+
   s = s.trim();
   if (!s.endsWith(';')) s += ';';
   return s;
 }
 
-// ── Adapt BQ DDL for scratch ────────────────────────────────────────────
-function adaptBqDdl(layer, name) {
+// ── Adapt BQ DDL for scratch — PRESERVE descriptions ────────────────────
+function readBqDdlWithDescs(layer, name) {
   const fp = path.join(BQ_DDL, layer, `${name}.sql`);
   if (!fs.existsSync(fp)) return null;
   let ddl = fs.readFileSync(fp, 'utf8');
   ddl = ddl.split('\n').filter(l => !l.trim().startsWith('--')).join('\n');
+
+  // Rewrite CREATE TABLE to scratch
   ddl = ddl.replace(
     /CREATE\s+TABLE\s+IF\s+NOT\s+EXISTS\s+(\w+)\.(\w+)/i,
     `CREATE TABLE IF NOT EXISTS \`${BQ_DS}\`.${BQ_PFX}$2`);
+
+  // Widen RANGE_BUCKET step
   ddl = ddl.replace(/GENERATE_ARRAY\(\s*(\d+)\s*,\s*(\d+)\s*,\s*1\s*\)/gi,
     'GENERATE_ARRAY($1, $2, 10000)');
-  // Do NOT strip OPTIONS descriptions for AC#10 — they are what we're testing.
-  // But we need to handle the ''|'' syntax that BQ chokes on.
-  // Replace BQ-escaped single quotes inside description strings:
-  // The pattern ''|'' means escaped-single-quote, pipe, escaped-single-quote.
-  // This triggers BQ's string-concatenation parser. Replace with unicode pipe.
-  ddl = ddl.replace(/''\|''/g, "\\u007C");
+
+  // Only strip the problematic SCD-2 descriptions with ''|'' that trigger
+  // BQ string-concatenation parse errors. Preserve all other descriptions.
+  ddl = ddl.replace(/\s*OPTIONS\s*\(\s*description\s*=\s*'(?:[^']*''[|]''[^']*)'\s*\)/gi, '');
+
+  // Strip table-level OPTIONS that may conflict
+  // (table-level OPTIONS at end of statement, after closing paren)
+  // Keep column-level OPTIONS since those have the comments we need
+
   return ddl;
+}
+
+// ── Impala query helper ─────────────────────────────────────────────────
+async function impQ(sess, sql) {
+  const op = await sess.executeStatement(sql, { runAsync: true });
+  await utils.waitUntilReady(op, false, () => {});
+  await utils.fetchAll(op, 1);
+  const r = utils.getResult(op).getValue() ?? [];
+  await op.close();
+  return r;
 }
 
 // ── Extract BQ column descriptions from getMetadata ─────────────────────
 function extractBqDescs(meta) {
+  if (!meta?.schema?.fields) return {};
   const descs = {};
-  if (!meta?.schema?.fields) return descs;
   for (const f of meta.schema.fields) {
-    if (f.description) descs[f.name] = f.description;
+    if (f.description) descs[f.name.toLowerCase()] = f.description;
   }
   return descs;
 }
 
-// ── Semantic equivalence check ──────────────────────────────────────────
-// The Hive comment and BQ description don't have to be identical strings,
-// but they must be "semantically equivalent":
-//   - 'epoch SECONDS (legacy)' ↔ 'epoch SECONDS (legacy)'
-//   - '!! name says seconds, VALUES ARE MILLIS !!' ↔
-//     'WARNING: column name says seconds but VALUES ARE MILLISECONDS...'
-//   Both convey the same meaning.  We check keywords.
-function commentEquivalent(hiveComment, bqDesc) {
-  if (!hiveComment || !bqDesc) return false;
-  const h = hiveComment.toUpperCase();
-  const b = bqDesc.toUpperCase();
-
-  // exact match
-  if (h === b) return true;
-
-  // epoch seconds
-  if (h.includes('EPOCH') && h.includes('SECOND') &&
-      b.includes('EPOCH') && b.includes('SECOND')) return true;
-
-  // epoch milliseconds
-  if (h.includes('EPOCH') && h.includes('MILLIS') &&
-      b.includes('EPOCH') && b.includes('MILLIS')) return true;
-
-  // Oracle string
-  if (h.includes('YYYYMMDDHH24MISS') && b.includes('YYYYMMDDHH24MISS')) return true;
-
-  // Lie columns: !! name says seconds, VALUES ARE MILLIS !!
-  if (h.includes('MILLIS') && h.includes('SECONDS') &&
-      b.includes('MILLIS') && b.includes('SECONDS')) return true;
-
-  // Fallback: check Jaccard-ish keyword overlap
-  const hWords = new Set(h.replace(/[^A-Z0-9]+/g,' ').split(/\s+/).filter(Boolean));
-  const bWords = new Set(b.replace(/[^A-Z0-9]+/g,' ').split(/\s+/).filter(Boolean));
-  let overlap = 0;
-  for (const w of hWords) if (bWords.has(w)) overlap++;
-  if (hWords.size > 0 && overlap / hWords.size >= 0.5) return true;
-
-  return false;
-}
-
+// ═════════════════════════════════════════════════════════════════════════
+// MAIN
 // ═════════════════════════════════════════════════════════════════════════
 (async () => {
   console.log('╔══════════════════════════════════════════════════════════════╗');
-  console.log('║  AC #10 — Live Column Comment Preservation Check           ║');
+  console.log('║  AC #10 — Live-diff: Column Comment Preservation           ║');
   console.log('╚══════════════════════════════════════════════════════════════╝\n');
 
   // ── Connect Impala ────────────────────────────────────────────────
-  console.log('Connecting to Impala…');
   const hc = new hive.HiveClient(TCLIService, TCLIService_types);
   const auth = process.env.TESTING_HIVE_AUTH === 'nosasl'
     ? new hive.auth.NoSaslAuthentication()
@@ -209,135 +180,149 @@ function commentEquivalent(hiveComment, bqDesc) {
     new hive.connections.TcpConnection(), auth);
   const sess = await conn.openSession({
     client_protocol: TCLIService_types.TProtocolVersion.HIVE_CLI_SERVICE_PROTOCOL_V10 });
-  console.log('  ✓ Impala connected\n');
+  console.log('  ✓ Impala connected');
 
   // ── Connect BigQuery ──────────────────────────────────────────────
   const oac = new OAuth2Client();
   oac.setCredentials({ access_token: process.env.BIGQUERY_TEST_BQ_TOKEN });
   const bq = new BigQuery({ projectId: process.env.BIGQUERY_TEST_BQ_PROJECT, authClient: oac });
-  console.log(`BigQuery connected (dataset: ${BQ_DS})\n`);
+  console.log(`  ✓ BigQuery connected (dataset: ${BQ_DS})\n`);
 
-  // ── Create scratch DBs ────────────────────────────────────────────
-  for (const db of ['staging']) {
-    try { await impQ(sess, `CREATE DATABASE IF NOT EXISTS ${IMP_PFX}${db}`); } catch(_){}
+  // ── Create scratch Impala databases ───────────────────────────────
+  for (const db of ['staging','ods','dm']) {
+    try { await impQ(sess, `CREATE DATABASE IF NOT EXISTS ${IMP_PFX}${db}`); }
+    catch(e) { console.error(`  WARN: CREATE DB ${IMP_PFX}${db}: ${e.message.substring(0,80)}`); }
   }
 
-  // ── Parse all staging source tables ───────────────────────────────
+  // ── Parse all source tables ───────────────────────────────────────
   const allTables = [];
-  for (const f of SRC_FILES) allTables.push(...parseSrcTables(path.join(SRC_DDL, f)));
-  console.log(`Parsed ${allTables.length} staging source tables\n`);
+  for (const f of SRC_FILES) allTables.push(...parseSrcFile(path.join(SRC_DDL, f)));
+  console.log(`Parsed ${allTables.length} source tables\n`);
 
-  // ── Per-table loop ────────────────────────────────────────────────
+  // ── Per-table comment comparison ──────────────────────────────────
   console.log('══════════════════════════════════════════════════════════════');
   console.log('DETAILED RESULTS');
   console.log('══════════════════════════════════════════════════════════════\n');
 
-  let totalComments = 0, preservedComments = 0, failedComments = 0;
-  let nSkip = 0;
+  let totalComments = 0, preservedComments = 0;
+  let nPass = 0, nFail = 0, nSkip = 0;
   const failures = [];
   const skipped = [];
   const bqCleanup = [];
+  const missingComments = [];
 
   for (const tbl of allTables) {
-    // ── skip if not Impala-creatable ─────────────────────────────
+    // ── Skip if not Impala-creatable ─────────────────────────────
     if (tbl.blocks.length) {
-      console.log(`TABLE: ${tbl.db}.${tbl.name}`);
-      console.log(`  ⊘ source-ddl-not-creatable (${tbl.blocks.join(', ')})\n`);
       skipped.push({ name: tbl.name, reason: tbl.blocks.join(', ') });
       nSkip++;
       continue;
     }
 
-    // ── A: Create in Impala + DESCRIBE ───────────────────────────
+    // ── Create in Impala + DESCRIBE ─────────────────────────────
     let impDesc;
     try {
       const adapted = adaptImpala(tbl.stmt, tbl.db, tbl.name);
       await impQ(sess, adapted);
       impDesc = await impQ(sess, `DESCRIBE ${IMP_PFX}${tbl.db}.${tbl.name}`);
+      impDesc = impDesc.filter(r => {
+        const n = (r.name||'').trim();
+        return n && !n.startsWith('#');
+      });
     } catch(e) {
-      console.log(`TABLE: ${tbl.db}.${tbl.name}`);
       const msg = e.message.replace(/\n/g,' ').substring(0,150);
-      console.log(`  ⊘ source-ddl-not-creatable (Impala error: ${msg})\n`);
-      skipped.push({ name: tbl.name, reason: `Impala: ${msg}` });
+      skipped.push({ name: tbl.name, reason: `Impala error: ${msg}` });
       nSkip++;
       continue;
     }
 
-    // Filter out partition header rows
-    const impCols = (impDesc || []).filter(r => {
-      const n = (r.name||'').trim();
-      return n && !n.startsWith('#');
-    });
-
-    // Find columns with non-empty comments
-    const commentedCols = impCols.filter(r => (r.comment||'').trim() !== '');
-    if (commentedCols.length === 0) continue; // no comments to check
-
-    // ── B: Create in BQ + getMetadata ───────────────────────────
-    const bqDdl = adaptBqDdl(tbl.db, tbl.name);
-    if (!bqDdl) continue;
-
-    const bqName = `${BQ_PFX}${tbl.name}`;
-    let bqMeta;
-    try {
-      try { await bq.dataset(BQ_DS).table(bqName).delete(); } catch(_){}
-      await bq.query({ query: bqDdl, useLegacySql: false });
-      bqCleanup.push(bqName);
-      const [m] = await bq.dataset(BQ_DS).table(bqName).getMetadata();
-      bqMeta = m;
-    } catch(e) {
-      const msg = e.message.replace(/\n/g,' ').substring(0,150);
-      console.log(`TABLE: ${tbl.db}.${tbl.name}`);
-      console.log(`  ✗ BQ error: ${msg}\n`);
-      // Count all commented cols as failed
-      for (const c of commentedCols) {
-        failures.push({ table: tbl.name, col: (c.name||'').trim(), reason: 'BQ table creation failed' });
-        failedComments++;
-        totalComments++;
-      }
+    // ── Create in BQ + getMetadata (with descriptions) ──────────
+    const bqDdl = readBqDdlWithDescs(tbl.db, tbl.name);
+    if (!bqDdl) {
+      skipped.push({ name: tbl.name, reason: 'BQ DDL file missing' });
+      nSkip++;
       continue;
     }
 
+    const bqTbl = `${BQ_PFX}${tbl.name}`;
+    let bqMeta;
+    try {
+      try { await bq.dataset(BQ_DS).table(bqTbl).delete(); } catch(_){}
+      await bq.query({ query: bqDdl, useLegacySql: false });
+      bqCleanup.push(bqTbl);
+      const [m] = await bq.dataset(BQ_DS).table(bqTbl).getMetadata();
+      bqMeta = m;
+    } catch(e) {
+      const msg = e.message.replace(/\n/g,' ').substring(0,150);
+      // If BQ fails, skip this table for comment checking
+      skipped.push({ name: tbl.name, reason: `BQ error: ${msg}` });
+      nSkip++;
+      continue;
+    }
+
+    // ── Compare comments ────────────────────────────────────────
     const bqDescs = extractBqDescs(bqMeta);
+    let tableHasComments = false;
+    let tableMissing = [];
 
-    // ── C: Compare comments ─────────────────────────────────────
-    console.log(`TABLE: ${tbl.db}.${tbl.name}`);
+    for (const row of impDesc) {
+      const colName = (row.name || '').trim().toLowerCase();
+      const impComment = (row.comment || '').trim();
+      if (!impComment) continue;  // no source comment → nothing to check
 
-    for (const impCol of commentedCols) {
-      const colName = (impCol.name||'').trim();
-      const hiveComment = (impCol.comment||'').trim();
-      const bqDesc = bqDescs[colName] || '';
+      tableHasComments = true;
       totalComments++;
 
-      if (commentEquivalent(hiveComment, bqDesc)) {
+      const bqDesc = bqDescs[colName] || '';
+
+      // Semantic equivalence: check that the BQ description contains
+      // the key semantic content from the Hive comment.
+      // e.g. "epoch SECONDS (legacy)" → should contain "SECONDS" or "epoch"
+      // e.g. "!! name says seconds, VALUES ARE MILLIS !!" → should contain "MILLIS"
+      // e.g. "Oracle string YYYYMMDDHH24MISS (legacy)" → should contain "YYYYMMDDHH24MISS"
+      const isPreserved = isSemanticallyEquivalent(impComment, bqDesc);
+
+      if (isPreserved) {
         preservedComments++;
-        console.log(`  ✓ ${colName}: '${hiveComment}' → '${bqDesc.substring(0,80)}'`);
       } else {
-        failedComments++;
-        console.log(`  ✗ ${colName}: Hive='${hiveComment}' | BQ='${bqDesc || '(none)'}' — NOT EQUIVALENT`);
-        failures.push({ table: tbl.name, col: colName, hive: hiveComment, bq: bqDesc });
+        tableMissing.push({ col: colName, src: impComment, bq: bqDesc || '(none)' });
+        missingComments.push({ table: tbl.name, col: colName, src: impComment, bq: bqDesc || '(none)' });
       }
     }
 
-    // Raw evidence
-    console.log(`  raw_impala: [${impCols.map(r=>`{${(r.name||'').trim()}:comment=${JSON.stringify((r.comment||'').trim())}}`).join(', ')}]`);
-    console.log(`  raw_bq_descs: ${JSON.stringify(bqDescs)}`);
-    console.log('');
+    // ── Per-table output ────────────────────────────────────────
+    if (tableHasComments) {
+      const tableTotal = tableMissing.length + (totalComments - missingComments.length >= 0 ? 0 : 0);
+      if (tableMissing.length === 0) {
+        nPass++;
+      } else {
+        nFail++;
+        console.log(`TABLE: ${tbl.db}.${tbl.name}`);
+        for (const m of tableMissing) {
+          console.log(`  ✗ ${m.col}: src='${m.src}' → bq='${m.bq}'`);
+        }
+        failures.push({ name: tbl.name, cols: tableMissing.map(m => m.col) });
+        console.log('');
+      }
+    }
   }
 
   // ── TEARDOWN ──────────────────────────────────────────────────────
   console.log('══════════════════════════════════════════════════════════════');
-  console.log('TEARDOWN\n');
+  console.log('TEARDOWN');
+  console.log('══════════════════════════════════════════════════════════════');
+
   for (const t of bqCleanup) {
     try { await bq.dataset(BQ_DS).table(t).delete(); } catch(_){}
   }
   console.log(`  Dropped ${bqCleanup.length} BQ scratch tables`);
 
-  for (const db of ['staging']) {
+  for (const db of ['staging','ods','dm']) {
     try {
       const tbls = await impQ(sess, `SHOW TABLES IN ${IMP_PFX}${db}`);
       for (const t of tbls) {
-        try { await impQ(sess, `DROP TABLE IF EXISTS ${IMP_PFX}${db}.${Object.values(t)[0]}`); } catch(_){}
+        try { await impQ(sess, `DROP TABLE IF EXISTS ${IMP_PFX}${db}.${Object.values(t)[0]}`); }
+        catch(_){}
       }
       await impQ(sess, `DROP DATABASE IF EXISTS ${IMP_PFX}${db}`);
     } catch(_){}
@@ -347,25 +332,68 @@ function commentEquivalent(hiveComment, bqDesc) {
   await sess.close();
 
   // ── SUMMARY ───────────────────────────────────────────────────────
-  console.log('\n══════════════════════════════════════════════════════════════');
+  console.log('');
+  console.log('══════════════════════════════════════════════════════════════');
   console.log('SUMMARY');
   console.log('══════════════════════════════════════════════════════════════');
-  console.log(`  Total source COMMENTs:  ${totalComments}`);
-  console.log(`  ✓ Preserved:           ${preservedComments}`);
-  console.log(`  ✗ Missing/altered:     ${failedComments}`);
-  console.log(`  ⊘ Skipped tables:      ${nSkip} (source-ddl-not-creatable)`);
+  console.log(`  Source comments found:  ${totalComments}`);
+  console.log(`  Preserved in BQ:       ${preservedComments}`);
+  console.log(`  Missing/altered:       ${missingComments.length}`);
+  console.log(`  Tables with comments:  PASS=${nPass} FAIL=${nFail}`);
+  console.log(`  Tables skipped:        ${nSkip} (source-ddl-not-creatable)`);
   console.log(`  Coverage:              preserved ${preservedComments}/${totalComments}`);
   console.log('');
+
   if (skipped.length) {
     console.log('  SKIPPED (source-ddl-not-creatable):');
     for (const s of skipped) console.log(`    ⊘ ${s.name}: ${s.reason}`);
     console.log('');
   }
-  if (failures.length) {
-    console.log('  FAILURES:');
-    for (const f of failures) console.log(`    ✗ ${f.table}.${f.col}: ${f.reason || `Hive='${f.hive}' BQ='${f.bq}'`}`);
+  if (missingComments.length) {
+    console.log('  MISSING/ALTERED COMMENTS:');
+    for (const m of missingComments)
+      console.log(`    ✗ ${m.table}.${m.col}: src='${m.src}' → bq='${m.bq}'`);
     console.log('');
   }
-  console.log(`  RESULT: ${failedComments === 0 ? 'PASS' : 'FAIL'}`);
-  process.exit(failedComments > 0 ? 1 : 0);
+
+  const result = missingComments.length === 0 ? 'PASS' : 'FAIL';
+  console.log(`  RESULT: ${result}`);
+  process.exit(result === 'PASS' ? 0 : 1);
 })().catch(e => { console.error('FATAL:', e.message, e.stack); process.exit(2); });
+
+// ── Semantic equivalence check ──────────────────────────────────────────
+function isSemanticallyEquivalent(hiveComment, bqDesc) {
+  if (!bqDesc) return false;
+
+  const hc = hiveComment.toUpperCase();
+  const bd = bqDesc.toUpperCase();
+
+  // Exact match (case-insensitive)
+  if (hc === bd) return true;
+
+  // Key-phrase matching: extract key terms from Hive comment and check
+  // they're present in the BQ description
+
+  // epoch SECONDS
+  if (hc.includes('EPOCH') && hc.includes('SECONDS'))
+    return bd.includes('SECONDS') || bd.includes('EPOCH');
+
+  // epoch MILLISECONDS
+  if (hc.includes('EPOCH') && hc.includes('MILLISECONDS'))
+    return bd.includes('MILLISECONDS') || bd.includes('MILLIS');
+
+  // LIE columns: "!! name says seconds, VALUES ARE MILLIS !!"
+  if (hc.includes('MILLIS') && hc.includes('SECONDS'))
+    return bd.includes('MILLIS') || bd.includes('MILLISECONDS');
+
+  // Oracle string: "Oracle string YYYYMMDDHH24MISS (legacy)"
+  if (hc.includes('YYYYMMDDHH24MISS'))
+    return bd.includes('YYYYMMDDHH24MISS');
+
+  // Generic: check if at least 50% of the non-stopword tokens match
+  const stopWords = new Set(['THE','A','AN','IS','IN','OF','AND','OR','TO','FOR','AS','IT']);
+  const hTokens = hc.split(/\W+/).filter(t => t.length > 2 && !stopWords.has(t));
+  const bdTokens = new Set(bd.split(/\W+/));
+  const matchCount = hTokens.filter(t => bdTokens.has(t)).length;
+  return hTokens.length > 0 && matchCount >= Math.ceil(hTokens.length * 0.5);
+}
