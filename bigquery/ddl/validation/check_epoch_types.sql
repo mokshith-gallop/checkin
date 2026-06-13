@@ -41,9 +41,8 @@ ods_ts_cols AS (
   SELECT table_name, column_name, data_type,
          CASE WHEN data_type = 'TIMESTAMP' THEN 'PASS' ELSE 'FAIL' END AS status
   FROM   ods.INFORMATION_SCHEMA.COLUMNS
-  WHERE  column_name LIKE '%_ts' OR column_name LIKE '%_ts_%'
+  WHERE  (column_name LIKE '%_ts' OR column_name LIKE '%_ts_%')
     AND  data_type IN ('TIMESTAMP', 'INT64', 'STRING')
-    AND  column_name NOT IN ('eff_from_ts')  -- include this one too
 ),
 
 -- Check 3: Lie columns must have MILLISECONDS in description
