@@ -149,6 +149,17 @@ async function impQ(sess, sql) {
     });
   }
   let bq = makeBq();
+  // Wrapper: retry once with refreshed token on auth failure
+  async function bqRun(fn) {
+    try { return await fn(bq); }
+    catch(e) {
+      if (/authentication|credentials|token/i.test(e.message)) {
+        bq = makeBq();
+        return await fn(bq);
+      }
+      throw e;
+    }
+  }
   console.log(`  ✓ BigQuery connected (dataset: ${BQ_DS})\n`);
 
   // ── Connect Impala (for source-view column resolution) ────────────
@@ -177,8 +188,10 @@ async function impQ(sess, sql) {
     if (!ddl) { tblFailed++; continue; }
     const bqName = `${PFX}${tbl.name}`;
     try {
-      try { await bq.dataset(BQ_DS).table(bqName).delete(); } catch(_){}
-      await bq.query({ query: ddl, useLegacySql: false, location: BQ_LOC });
+      await bqRun(async b => {
+        try { await b.dataset(BQ_DS).table(bqName).delete(); } catch(_){}
+        await b.query({ query: ddl, useLegacySql: false, location: BQ_LOC });
+      });
       bqCleanup.push(bqName);
       tblCreated++;
     } catch(e) {
@@ -212,11 +225,13 @@ async function impQ(sess, sql) {
     const bqName = `${PFX}${vw}`;
     let bqMeta;
     try {
-      try { await bq.dataset(BQ_DS).table(bqName).delete(); } catch(_){}
-      await bq.query({ query: ddl, useLegacySql: false, location: BQ_LOC });
-      bqCleanup.push(bqName);
-      const [m] = await bq.dataset(BQ_DS).table(bqName).getMetadata();
-      bqMeta = m;
+      bqMeta = await bqRun(async b => {
+        try { await b.dataset(BQ_DS).table(bqName).delete(); } catch(_){}
+        await b.query({ query: ddl, useLegacySql: false, location: BQ_LOC });
+        bqCleanup.push(bqName);
+        const [m] = await b.dataset(BQ_DS).table(bqName).getMetadata();
+        return m;
+      });
     } catch(e) {
       const msg = e.message.replace(/\n/g,' ').substring(0,200);
       console.log(`  ✗ HARD FAIL — BQ: ${msg}\n`);
@@ -258,6 +273,7 @@ async function impQ(sess, sql) {
   console.log('TEARDOWN');
   console.log('══════════════════════════════════════════════════════════════');
 
+  bq = makeBq(); // refresh token for cleanup
   for (const t of bqCleanup) {
     try { await bq.dataset(BQ_DS).table(t).delete(); } catch(_){}
   }

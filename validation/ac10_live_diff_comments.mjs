@@ -182,14 +182,32 @@ function extractBqDescs(meta) {
     client_protocol: TCLIService_types.TProtocolVersion.HIVE_CLI_SERVICE_PROTOCOL_V10 });
   console.log('  ✓ Impala connected');
 
-  // ── Connect BigQuery ──────────────────────────────────────────────
-  const oac = new OAuth2Client();
-  oac.setCredentials({ access_token: process.env.BIGQUERY_TEST_BQ_TOKEN });
-  const bq = new BigQuery({
-    projectId: process.env.BIGQUERY_TEST_BQ_PROJECT,
-    authClient: oac,
-    location: process.env.BIGQUERY_TEST_BQ_LOCATION || 'EU',
-  });
+  // ── Connect BigQuery (with token refresh) ──────────────────────────
+  function makeBq() {
+    try {
+      const envTxt = fs.readFileSync('/workspace/.gallop/db.env', 'utf8');
+      const m = envTxt.match(/BIGQUERY_TEST_BQ_TOKEN='([^']+)'/);
+      if (m) process.env.BIGQUERY_TEST_BQ_TOKEN = m[1];
+    } catch(_) {}
+    const oa = new OAuth2Client();
+    oa.setCredentials({ access_token: process.env.BIGQUERY_TEST_BQ_TOKEN });
+    return new BigQuery({
+      projectId: process.env.BIGQUERY_TEST_BQ_PROJECT,
+      authClient: oa,
+      location: process.env.BIGQUERY_TEST_BQ_LOCATION || 'EU',
+    });
+  }
+  let bq = makeBq();
+  async function bqRun(fn) {
+    try { return await fn(bq); }
+    catch(e) {
+      if (/authentication|credentials|token/i.test(e.message)) {
+        bq = makeBq();
+        return await fn(bq);
+      }
+      throw e;
+    }
+  }
   console.log(`  ✓ BigQuery connected (dataset: ${BQ_DS})\n`);
 
   // ── Create scratch Impala databases ───────────────────────────────
@@ -251,14 +269,15 @@ function extractBqDescs(meta) {
     const bqTbl = `${BQ_PFX}${tbl.name}`;
     let bqMeta;
     try {
-      try { await bq.dataset(BQ_DS).table(bqTbl).delete(); } catch(_){}
-      await bq.query({ query: bqDdl, useLegacySql: false });
-      bqCleanup.push(bqTbl);
-      const [m] = await bq.dataset(BQ_DS).table(bqTbl).getMetadata();
-      bqMeta = m;
+      bqMeta = await bqRun(async b => {
+        try { await b.dataset(BQ_DS).table(bqTbl).delete(); } catch(_){}
+        await b.query({ query: bqDdl, useLegacySql: false });
+        bqCleanup.push(bqTbl);
+        const [m] = await b.dataset(BQ_DS).table(bqTbl).getMetadata();
+        return m;
+      });
     } catch(e) {
       const msg = e.message.replace(/\n/g,' ').substring(0,150);
-      // If BQ fails, skip this table for comment checking
       skipped.push({ name: tbl.name, reason: `BQ error: ${msg}` });
       nSkip++;
       continue;
@@ -316,6 +335,7 @@ function extractBqDescs(meta) {
   console.log('TEARDOWN');
   console.log('══════════════════════════════════════════════════════════════');
 
+  bq = makeBq(); // refresh token for cleanup
   for (const t of bqCleanup) {
     try { await bq.dataset(BQ_DS).table(t).delete(); } catch(_){}
   }
