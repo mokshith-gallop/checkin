@@ -13,7 +13,7 @@
 --   - Hive TIMESTAMP → BigQuery TIMESTAMP.
 --   - Hive DECIMAL(8,2) → BigQuery NUMERIC(8,2).
 --   - Hive PARTITIONED BY (date_key INT) → inlined INT64 column +
---     PARTITION BY RANGE_BUCKET(date_key, GENERATE_ARRAY(20200101, 20260101, 1)).
+--     PARTITION BY RANGE_BUCKET(date_key, GENERATE_ARRAY(20200101, 20260101, 10000)).
 --   - Column count: 9 source columns + 1 inlined partition column = 10 total.
 
 CREATE TABLE IF NOT EXISTS dm.fact_queue_interval (
@@ -28,4 +28,4 @@ CREATE TABLE IF NOT EXISTS dm.fact_queue_interval (
   avg_handle_sec         NUMERIC(8,2),
   date_key               INT64
 )
-PARTITION BY RANGE_BUCKET(date_key, GENERATE_ARRAY(20200101, 20260101, 1));
+PARTITION BY RANGE_BUCKET(date_key, GENERATE_ARRAY(20200101, 20260101, 10000));

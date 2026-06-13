@@ -36,5 +36,5 @@ CREATE TABLE IF NOT EXISTS dm.fact_interaction (
   date_key           INT64,
   channel            STRING
 )
-PARTITION BY RANGE_BUCKET(date_key, GENERATE_ARRAY(20200101, 20260101, 1))
+PARTITION BY RANGE_BUCKET(date_key, GENERATE_ARRAY(20200101, 20260101, 10000))
 CLUSTER BY channel, agent_sk, client_sk;

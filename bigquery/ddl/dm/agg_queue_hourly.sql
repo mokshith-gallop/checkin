@@ -12,7 +12,7 @@
 --   - Hive BIGINT → BigQuery INT64; Hive INT → BigQuery INT64.
 --   - Hive DECIMAL(5,2) → BigQuery NUMERIC(5,2); DECIMAL(7,2) → NUMERIC(7,2).
 --   - Hive PARTITIONED BY (date_key INT) → inlined INT64 column +
---     PARTITION BY RANGE_BUCKET(date_key, GENERATE_ARRAY(20200101, 20260101, 1)).
+--     PARTITION BY RANGE_BUCKET(date_key, GENERATE_ARRAY(20200101, 20260101, 10000)).
 --   - Column count: 8 source columns + 1 inlined partition column = 9 total.
 
 CREATE TABLE IF NOT EXISTS dm.agg_queue_hourly (
@@ -26,4 +26,4 @@ CREATE TABLE IF NOT EXISTS dm.agg_queue_hourly (
   volume_variance_pct    NUMERIC(7,2),
   date_key               INT64
 )
-PARTITION BY RANGE_BUCKET(date_key, GENERATE_ARRAY(20200101, 20260101, 1));
+PARTITION BY RANGE_BUCKET(date_key, GENERATE_ARRAY(20200101, 20260101, 10000));

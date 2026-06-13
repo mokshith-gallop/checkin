@@ -21,7 +21,7 @@
 --   - Column count: 8 source columns + 1 inlined partition column = 9 total.
 
 CREATE TABLE IF NOT EXISTS ods.ods_agent_assignment_scd2 (
-  assignment_history_id   STRING OPTIONS (description = 'Surrogate key: TO_HEX(MD5(CONCAT(CAST(agent_id AS STRING), ''|'', CAST(program_id AS STRING), ''|'', CAST(eff_from_ts AS STRING))))'),
+  assignment_history_id   STRING OPTIONS (description = 'Surrogate key: TO_HEX(MD5(CONCAT(CAST(agent_id AS STRING), \'|\', CAST(program_id AS STRING), \'|\', CAST(eff_from_ts AS STRING))))'),
   agent_id                INT64,
   program_id              INT64,
   queue_id                INT64,

@@ -107,9 +107,9 @@ None exceed NUMERIC(38,9), so no BIGNUMERIC is used anywhere.
 | `PARTITIONED BY (sched_date STRING)` | `sched_date DATE` + `PARTITION BY sched_date` | ods_schedule |
 | `PARTITIONED BY (work_month/period_month/swap_month/event_month STRING)` | `<col> DATE` + `PARTITION BY <col>` (first-of-month convention) | 5 ODS delta-merge, 4 DM aggs/facts |
 | `PARTITIONED BY (eff_from_year INT)` | `PARTITION BY RANGE_BUCKET(eff_from_year, GENERATE_ARRAY(2020, 2026, 1))` | 3 SCD-2 |
-| `PARTITIONED BY (date_key INT)` | `PARTITION BY RANGE_BUCKET(date_key, GENERATE_ARRAY(20200101, 20260101, 1))` | 12 DM facts/aggs |
+| `PARTITIONED BY (date_key INT)` | `PARTITION BY RANGE_BUCKET(date_key, GENERATE_ARRAY(20200101, 20260101, 10000))` | 12 DM facts/aggs |
 | `PARTITIONED BY (date_key INT, channel STRING)` | `PARTITION BY RANGE_BUCKET(date_key, ...)` + `CLUSTER BY channel, agent_sk, client_sk` | fact_interaction |
-| `PARTITIONED BY (week_start_key INT)` | `PARTITION BY RANGE_BUCKET(week_start_key, GENERATE_ARRAY(20200101, 20260101, 1))` | agg_agent_weekly |
+| `PARTITIONED BY (week_start_key INT)` | `PARTITION BY RANGE_BUCKET(week_start_key, GENERATE_ARRAY(20200101, 20260101, 10000))` | agg_agent_weekly |
 | No partition (ACID / dimensions) | Unpartitioned | 4 ACID + 9 dimensions |
 
 ### Bucketing → Clustering

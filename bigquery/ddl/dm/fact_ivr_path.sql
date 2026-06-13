@@ -13,7 +13,7 @@
 --   - Hive BOOLEAN → BigQuery BOOL.
 --   - Hive STRING  → BigQuery STRING.
 --   - Hive PARTITIONED BY (date_key INT) → inlined INT64 column +
---     PARTITION BY RANGE_BUCKET(date_key, GENERATE_ARRAY(20200101, 20260101, 1)).
+--     PARTITION BY RANGE_BUCKET(date_key, GENERATE_ARRAY(20200101, 20260101, 10000)).
 --   - Column count: 7 source columns + 1 inlined partition column = 8 total.
 
 CREATE TABLE IF NOT EXISTS dm.fact_ivr_path (
@@ -26,4 +26,4 @@ CREATE TABLE IF NOT EXISTS dm.fact_ivr_path (
   duration_seconds   INT64,
   date_key           INT64
 )
-PARTITION BY RANGE_BUCKET(date_key, GENERATE_ARRAY(20200101, 20260101, 1));
+PARTITION BY RANGE_BUCKET(date_key, GENERATE_ARRAY(20200101, 20260101, 10000));

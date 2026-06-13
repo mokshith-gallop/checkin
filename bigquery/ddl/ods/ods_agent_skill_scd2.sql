@@ -21,7 +21,7 @@
 --   - Column count: 9 source columns + 1 inlined partition column = 10 total.
 
 CREATE TABLE IF NOT EXISTS ods.ods_agent_skill_scd2 (
-  agent_skill_history_id   STRING OPTIONS (description = 'Surrogate key: TO_HEX(MD5(CONCAT(CAST(agent_id AS STRING), ''|'', CAST(skill_id AS STRING), ''|'', CAST(eff_from_ts AS STRING))))'),
+  agent_skill_history_id   STRING OPTIONS (description = 'Surrogate key: TO_HEX(MD5(CONCAT(CAST(agent_id AS STRING), \'|\', CAST(skill_id AS STRING), \'|\', CAST(eff_from_ts AS STRING))))'),
   agent_id                 INT64,
   skill_id                 INT64,
   skill_code               STRING,
