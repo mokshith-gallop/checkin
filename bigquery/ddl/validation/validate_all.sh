@@ -1,6 +1,19 @@
 #!/usr/bin/env bash
 # =============================================================================
-# validate_all.sh — Run all 7 acceptance-criteria validation SQL scripts.
+# validate_all.sh — Run all acceptance-criteria validation SQL scripts.
+#
+# Covers:
+#   AC #1  — Column count parity (100 tables)
+#   AC #2  — Epoch encoding types & descriptions
+#   AC #3  — ACID tables (native, nullable, no ORC)
+#   AC #4  — Identifier legality (names, reserved words)
+#   AC #5  — SCD-2 surrogate keys (STRING + MD5)
+#   AC #6  — DECIMAL precision (NUMERIC, 7 distinct pairs)
+#   AC #7  — Format provenance (BASE TABLE + description)
+#   AC #8  — Complex types (ARRAY/STRUCT/JSON recursive)
+#   AC #9  — Nullability (no NULLABLE→REQUIRED)
+#   AC #10 — Partition type legality (no STRING partitions)
+#   AC #11 — Comment preservation (68 Hive COMMENTs)
 #
 # Usage:
 #   ./validate_all.sh [--project PROJECT_ID]
@@ -56,13 +69,18 @@ echo "║  $(date -u '+%Y-%m-%d %H:%M:%S UTC')                              ║"
 echo "╚════════════════════════════════════════════════════════════╝"
 echo ""
 
-run_check "$SCRIPT_DIR/check_column_counts.sql"    "AC #1 — Column count parity (100 tables)"
-run_check "$SCRIPT_DIR/check_epoch_types.sql"       "AC #2 — Epoch encoding types & descriptions"
-run_check "$SCRIPT_DIR/check_complex_types.sql"     "AC #3 — Complex types (ARRAY/STRUCT/JSON)"
-run_check "$SCRIPT_DIR/check_acid_tables.sql"       "AC #4 — ACID tables (native, nullable, no ORC)"
-run_check "$SCRIPT_DIR/check_scd2_keys.sql"         "AC #5 — SCD-2 surrogate keys (STRING + MD5)"
-run_check "$SCRIPT_DIR/check_format_tables.sql"     "AC #6 — Format provenance (BASE TABLE + description)"
-run_check "$SCRIPT_DIR/check_decimal_precision.sql"  "AC #7 — DECIMAL precision (NUMERIC, 7 pairs)"
+# Core schema checks
+run_check "$SCRIPT_DIR/check_column_counts.sql"         "AC #1  — Column count parity (100 tables)"
+run_check "$SCRIPT_DIR/check_epoch_types.sql"            "AC #2  — Epoch encoding types & descriptions"
+run_check "$SCRIPT_DIR/check_acid_tables.sql"            "AC #3  — ACID tables (native, nullable, no ORC)"
+run_check "$SCRIPT_DIR/check_identifiers.sql"            "AC #4  — Identifier legality (checked X/Y)"
+run_check "$SCRIPT_DIR/check_scd2_keys.sql"              "AC #5  — SCD-2 surrogate keys (STRING + MD5)"
+run_check "$SCRIPT_DIR/check_decimal_precision.sql"      "AC #6  — DECIMAL precision (checked X/Y DECIMAL columns)"
+run_check "$SCRIPT_DIR/check_format_tables.sql"          "AC #7  — Format provenance (BASE TABLE + description)"
+run_check "$SCRIPT_DIR/check_complex_types.sql"          "AC #8  — Complex types (ARRAY/STRUCT/JSON recursive)"
+run_check "$SCRIPT_DIR/check_nullability.sql"            "AC #9  — Nullability (checked X/Y, no REQUIRED)"
+run_check "$SCRIPT_DIR/check_partition_types.sql"        "AC #10 — Partition type legality (no STRING partitions)"
+run_check "$SCRIPT_DIR/check_comment_preservation.sql"   "AC #11 — Comment preservation (preserved X/Y)"
 
 echo "╔════════════════════════════════════════════════════════════╗"
 echo "║  CONSOLIDATED SUMMARY                                     ║"
@@ -78,7 +96,7 @@ done
 echo ""
 
 if [[ $FAIL -eq 0 ]]; then
-  echo "  OVERALL: ALL QUERIES EXECUTED SUCCESSFULLY"
+  echo "  OVERALL: ALL $TOTAL QUERIES EXECUTED SUCCESSFULLY"
   echo "  (Review individual query output above for PASS/FAIL per row)"
   exit 0
 else
