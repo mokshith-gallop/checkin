@@ -87,12 +87,18 @@ function parseBqDdl(filepath) {
   if (endIdx<0) return result;
   const colBlock = code.substring(startIdx+1, endIdx);
   const afterBlock = code.substring(endIdx+1);
-  // Split columns at depth-0 commas, respecting quotes
+  // Split columns at depth-0 commas, respecting quotes (handles \' and '' escapes)
   const colStrings = []; let current='', d=0, inStr=false;
   for (let i=0; i<colBlock.length; i++) {
     const ch = colBlock[i];
     if(ch==="'"&&!inStr){inStr=true;current+=ch;continue;}
-    if(ch==="'"&&inStr){if(colBlock[i+1]==="'"){current+="''";i++;continue;}inStr=false;current+=ch;continue;}
+    if(ch==="'"&&inStr){
+      // Handle \' backslash escape
+      if(i>0&&colBlock[i-1]==='\\'){current+=ch;continue;}
+      // Handle '' double-quote escape
+      if(colBlock[i+1]==="'"){current+="''";i++;continue;}
+      inStr=false;current+=ch;continue;
+    }
     if(inStr){current+=ch;continue;}
     if(ch==='<'||ch==='(')d++; if(ch==='>'||ch===')')d--;
     if(ch===','&&d===0){if(current.trim())colStrings.push(current.trim());current='';}else{current+=ch;}
@@ -100,8 +106,22 @@ function parseBqDdl(filepath) {
   if(current.trim())colStrings.push(current.trim());
   for (const cs of colStrings) {
     let s=cs, description=null;
-    const optMatch = s.match(/\s*OPTIONS\s*\(\s*description\s*=\s*'((?:[^']|'')*?)'\s*\)/i);
-    if(optMatch){description=optMatch[1].replace(/''/g,"'");s=s.replace(optMatch[0],'').trim();}
+    // Extract OPTIONS(description='...') handling both \' and '' escapes
+    const optStart = s.search(/OPTIONS\s*\(/i);
+    if(optStart>=0){
+      const descMatch = s.substring(optStart).match(/OPTIONS\s*\(\s*description\s*=\s*'/i);
+      if(descMatch){
+        const dsp=optStart+descMatch.index+descMatch[0].length;
+        let desc='',de=-1;
+        for(let j=dsp;j<s.length;j++){
+          if(s[j]==="'"&&j>0&&s[j-1]==='\\'){desc+="'";continue;}
+          if(s[j]==="'"){if(s[j+1]==="'"){desc+="'";j++;continue;}de=j;break;}
+          if(s[j]==='\\'&&j+1<s.length&&s[j+1]==="'"){continue;}
+          desc+=s[j];
+        }
+        if(de>=0){description=desc;const foe=s.indexOf(')',de+1)+1;s=(s.substring(0,optStart)+s.substring(foe)).trim();}
+      }
+    }
     const colMatch = s.match(/^\s*(\w+)\s+(.+?)\s*$/);
     if(colMatch){const type=colMatch[2].trim();if(type.includes('NOT NULL'))result.hasNotNull=true;result.columns.push({name:colMatch[1],type,description});}
   }
