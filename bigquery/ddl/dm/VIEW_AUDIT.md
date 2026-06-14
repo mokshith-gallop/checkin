@@ -1,9 +1,9 @@
 # BigQuery View Audit Report — Hive→BigQuery Dialect Translation
 
-**Date**: Automated audit  
+**Date**: Automated audit (156 checks via `scripts/audit_views.mjs`)  
 **Scope**: All 15 DM views in `bigquery/ddl/dm/vw_*.sql`  
 **Source**: `/workspace/source/hive/ddl/09-dm-views.hql`  
-**Result**: ✅ ALL 15 VIEWS PASS — No fixes needed
+**Result**: ✅ ALL 15 VIEWS PASS — 156/156 checks passed, 0 issues
 
 ---
 
@@ -109,13 +109,17 @@ All `SUM(...) / COUNT(*) * 100` patterns in views produce correct percentage res
 
 ## Cross-Layer References
 
+All DM views that read from `ods.*` or `staging.*` tables (layer-skip reads):
+
 | View | Cross-Layer Table | Purpose |
 |------|------------------|---------|
-| `vw_billing_reconciliation` | `staging.stg_fin_invoice` | Raw epoch comparison |
-| `vw_queue_sla_attainment` | `staging.stg_crm_sla_target` | SLA target lookup |
+| `vw_org_hierarchy` | `ods.ods_org_unit` | Recursive hierarchy |
+| `vw_call_driver_regex` | `ods.ods_call` | Call data with disposition join |
+| `vw_repeat_contact_window` | `ods.ods_interaction` | Interaction timeline for repeat detection |
+| `vw_billing_reconciliation` | `staging.stg_fin_invoice`, `ods.ods_invoice_acid` | Raw epoch comparison |
+| `vw_agent_roster_current` | `ods.ods_agent_scd2`, `ods.ods_agent_assignment_scd2` | SCD-2 slice |
 | `vw_agent_scorecard` | `ods.ods_agent_skill_scd2` | Certified skills count |
 | `vw_attrition_risk` | `ods.ods_attrition_event` | Notice event count |
+| `vw_queue_sla_attainment` | `staging.stg_crm_sla_target` | SLA target lookup |
 | `vw_shrinkage_analysis` | `ods.ods_schedule` | Schedule join |
 | `vw_program_margin` | `ods.ods_timesheet`, `ods.ods_payroll_adjustment`, `ods.ods_contract_line` | Cost proxy |
-| `vw_agent_roster_current` | `ods.ods_agent_scd2`, `ods.ods_agent_assignment_scd2` | SCD-2 slice |
-| `vw_org_hierarchy` | `ods.ods_org_unit` | Recursive hierarchy |
